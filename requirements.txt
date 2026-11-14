@@ -1,0 +1,28 @@
+# ============================================================
+# playwright-server-native — pinned dependencies
+# Compatible with Python 3.9 and Python 3.13
+# ============================================================
+
+# --- Core test runner ---
+pytest==8.3.4
+
+# --- Playwright (Python bindings + browsers) ---
+# 1.49.x is the last release series to officially support
+# Python 3.9 (EOL Oct 2025) while also running on 3.13.
+playwright==1.49.1
+
+# --- pytest-playwright integration ---
+# Keeps fixture API in sync with the playwright release above.
+pytest-playwright==0.6.2
+
+# --- HTML report ---
+# 4.x dropped Python 3.8 support; 4.x.x works on 3.9–3.13.
+pytest-html==4.1.1
+
+# --- pytest metadata (required by pytest-html 4.x) ---
+pytest-metadata==3.1.1
+
+# --- Environment variable management (.env) ---
+python-dotenv==1.0.1
+
+# --- Standard CSV / logging are built-ins; no extra package needed ---

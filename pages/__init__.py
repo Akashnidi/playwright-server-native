@@ -1,0 +1,16 @@
+"""
+pages/__init__.py — Package exports for SauceDemo Page Objects.
+"""
+from pages.base_page import BasePage
+from pages.login_page import LoginPage
+from pages.products_page import ProductsPage
+from pages.cart_page import CartPage
+from pages.checkout_page import CheckoutPage
+
+__all__ = [
+    "BasePage",
+    "LoginPage",
+    "ProductsPage",
+    "CartPage",
+    "CheckoutPage",
+]

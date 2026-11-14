@@ -1,0 +1,51 @@
+# .gitignore — playwright-server-native
+
+# ── Python bytecode & build ───────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+
+# ── Virtual environments ──────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Pytest cache & test artifacts ─────────────────────────
+.pytest_cache/
+.cache/
+
+# ── Execution reports (preserve directory with .gitkeep) ──
+reports/*
+!reports/.gitkeep
+
+# ── Execution logs (preserve directory with .gitkeep) ─────
+logs/*
+!logs/.gitkeep
+
+# ── Failure screenshots (preserve directory with .gitkeep) ─
+screenshots/*
+!screenshots/.gitkeep
+
+# ── Playwright state ──────────────────────────────────────
+playwright/.auth/
+test-results/
+
+# ── IDE & OS temporary files ──────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Environment & secrets ─────────────────────────────────
+.env
+.env.*
+*.env
+!.env.example
