@@ -7,21 +7,21 @@ pipeline {
         disableConcurrentBuilds()
     }
 
-    environment {
-        SAUCEDEMO_USERNAME = 'standard_user'
-        SAUCEDEMO_PASSWORD = 'secret_sauce'
-    }
-
     stages {
+
         stage('Check Python') {
             steps {
-                sh 'python3.9 --version'
+                sh '''
+                    set -e
+                    python3.9 --version
+                '''
             }
         }
 
         stage('Create Virtual Environment') {
             steps {
                 sh '''
+                    set -e
                     python3.9 -m venv .venv
                     .venv/bin/python -m pip install --upgrade pip
                 '''
@@ -31,6 +31,7 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 sh '''
+                    set -e
                     .venv/bin/python -m pip install -r requirements.txt
                 '''
             }
@@ -39,6 +40,7 @@ pipeline {
         stage('Install Playwright Chromium') {
             steps {
                 sh '''
+                    set -e
                     .venv/bin/python -m playwright install chromium
                 '''
             }
@@ -46,9 +48,18 @@ pipeline {
 
         stage('Run Tests') {
             steps {
-                sh '''
-                    .venv/bin/python -m pytest -v
-                '''
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'saucedemo-credentials',
+                        usernameVariable: 'SAUCEDEMO_USERNAME',
+                        passwordVariable: 'SAUCEDEMO_PASSWORD'
+                    )
+                ]) {
+                    sh '''
+                        set +x
+                        .venv/bin/python -m pytest -v
+                    '''
+                }
             }
         }
     }
@@ -59,6 +70,7 @@ pipeline {
                 artifacts: 'reports/**,logs/**,screenshots/**',
                 allowEmptyArchive: true
             )
+
             deleteDir()
         }
     }
