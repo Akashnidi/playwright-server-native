@@ -8,6 +8,7 @@ Provides:
 - Graceful page lifecycle management and shutdown
 - Automated failure screenshot capture hook with HTML report embedding
 - Automated CSV report generation across all test executions
+- Automated Jira failure payload generation (reports/failures.json)
 """
 import csv
 from typing import Generator
@@ -16,6 +17,7 @@ from playwright.sync_api import BrowserContext, Page
 from config.config import Config
 from utils.logger import get_logger
 from utils.screenshot import take_screenshot
+from utils.jira_notifier import write_failures_json
 
 logger = get_logger("conftest")
 
@@ -126,8 +128,19 @@ def pytest_runtest_makereport(item, call):
                 "Execution Status": "SKIPPED",
                 "Execution Duration (s)": round(report.duration, 4),
                 "Failure Message": report.longreprtext if report.longreprtext else "",
+                "Error Type": "",
+                "Full Traceback": "",
+                "Screenshot": "",
             }
         elif report.failed:
+            setup_error_type = ""
+            if call.excinfo:
+                setup_error_type = getattr(call.excinfo, "typename", "") or call.excinfo.type.__name__
+            if not setup_error_type and report.longreprtext:
+                for line in reversed(report.longreprtext.splitlines()):
+                    if ":" in line and ("Error" in line.split(":")[0] or "Exception" in line.split(":")[0]):
+                        setup_error_type = line.split(":")[0].strip().replace("E ", "")
+                        break
             records[nodeid] = {
                 "Test Name": test_name,
                 "Test File": test_file,
@@ -138,15 +151,33 @@ def pytest_runtest_makereport(item, call):
                     if report.longreprtext
                     else "Setup failure"
                 ),
+                "Error Type": setup_error_type or "SetupFailure",
+                "Full Traceback": report.longreprtext if report.longreprtext else "",
+                "Screenshot": "",
             }
 
     # Record test call execution
     elif report.when == "call":
         status = "FAILED" if report.failed else "PASSED"
         error_msg = ""
+        error_type = ""
+        full_tb = ""
+        screenshot_name = ""  # Relative filename stored for Jira payload reference
 
         if report.failed:
             logger.error(f"Test failed: {item.nodeid}")
+            full_tb = report.longreprtext if report.longreprtext else ""
+
+            # Extract exception type (e.g. AssertionError, TimeoutError)
+            if call.excinfo:
+                error_type = getattr(call.excinfo, "typename", "") or call.excinfo.type.__name__
+            if not error_type and full_tb:
+                for line in reversed(full_tb.splitlines()):
+                    if ":" in line and ("Error" in line.split(":")[0] or "Exception" in line.split(":")[0]):
+                        error_type = line.split(":")[0].strip().replace("E ", "")
+                        break
+            if not error_type:
+                error_type = "AssertionError" if "assert" in full_tb.lower() else "TestFailure"
 
             # Extract concise failure reason
             if report.longreprtext:
@@ -174,7 +205,8 @@ def pytest_runtest_makereport(item, call):
             else:
                 error_msg = "Test failed"
 
-            # Capture failure screenshot
+            # Capture failure screenshot and retain the relative path for
+            # the Jira failure payload (screenshots/<filename>).
             page_instance = item.funcargs.get("page")
             if page_instance:
                 screenshot_path = take_screenshot(
@@ -183,6 +215,14 @@ def pytest_runtest_makereport(item, call):
                 )
                 if screenshot_path and screenshot_path.exists():
                     logger.info(f"Captured failure screenshot: {screenshot_path}")
+                    # Store relative path so the Jira payload references a
+                    # portable Jenkins artifact path, not an absolute server path.
+                    try:
+                        screenshot_name = str(
+                            screenshot_path.relative_to(Config.PROJECT_ROOT)
+                        )
+                    except ValueError:
+                        screenshot_name = screenshot_path.name
 
                     # Attach to pytest-html if present
                     try:
@@ -204,20 +244,32 @@ def pytest_runtest_makereport(item, call):
             "Execution Status": status,
             "Execution Duration (s)": round(report.duration, 4),
             "Failure Message": error_msg,
+            "Error Type": error_type,
+            "Full Traceback": full_tb,
+            "Screenshot": screenshot_name,  # Empty string when test passes
         }
 
     # Record teardown failures
     elif report.when == "teardown":
         if report.failed and nodeid in records:
             records[nodeid]["Execution Status"] = "FAILED"
-            if not records[nodeid]["Failure Message"]:
+            if not records[nodeid].get("Failure Message"):
                 records[nodeid]["Failure Message"] = "Teardown failure"
+            if not records[nodeid].get("Error Type"):
+                teardown_err = ""
+                if call.excinfo:
+                    teardown_err = getattr(call.excinfo, "typename", "") or call.excinfo.type.__name__
+                records[nodeid]["Error Type"] = teardown_err or "TeardownFailure"
+            if not records[nodeid].get("Full Traceback") and report.longreprtext:
+                records[nodeid]["Full Traceback"] = report.longreprtext
 
 
-# ── Session Finish Hook (Generate CSV Report) ──────────────────────
+# ── Session Finish Hook (Generate CSV Report + Jira Failure Payload) ──
 def pytest_sessionfinish(session, exitstatus):
     """
     Writes collected test execution results to reports/report.csv.
+    When one or more tests have failed, also writes reports/failures.json
+    so the Jenkins pipeline can optionally dispatch a Jira webhook.
     Guaranteed to execute even if tests fail.
     """
     if getattr(session, "_csv_written", False):
@@ -228,10 +280,12 @@ def pytest_sessionfinish(session, exitstatus):
     if not records:
         return
 
+    # ── CSV Report ────────────────────────────────────────────────
     csv_path = Config.REPORTS_DIR / "report.csv"
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
-    fieldnames = [
+    # CSV columns exclude the Screenshot key (HTML report already embeds it).
+    csv_fieldnames = [
         "Test Name",
         "Test File",
         "Execution Status",
@@ -241,7 +295,7 @@ def pytest_sessionfinish(session, exitstatus):
 
     try:
         with open(csv_path, mode="w", newline="", encoding="utf-8") as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer = csv.DictWriter(csvfile, fieldnames=csv_fieldnames, extrasaction="ignore")
             writer.writeheader()
             for record in records.values():
                 writer.writerow(record)
@@ -250,3 +304,25 @@ def pytest_sessionfinish(session, exitstatus):
         )
     except Exception as exc:
         logger.error(f"Failed to generate CSV report: {exc}")
+
+    # ── Jira Failure Payload ──────────────────────────────────────
+    # Collect session-level counts for the payload summary section.
+    all_records = list(records.values())
+    total_tests = len(all_records)
+    passed_count  = sum(1 for r in all_records if r["Execution Status"] == "PASSED")
+    failed_count  = sum(1 for r in all_records if r["Execution Status"] == "FAILED")
+    skipped_count = sum(1 for r in all_records if r["Execution Status"] == "SKIPPED")
+    failed_records = [r for r in all_records if r["Execution Status"] == "FAILED"]
+
+    if failed_records:
+        write_failures_json(
+            failed_records=failed_records,
+            total_tests=total_tests,
+            passed=passed_count,
+            failed=failed_count,
+            skipped=skipped_count,
+        )
+    else:
+        logger.info(
+            "All tests passed — Jira failure payload not generated (nothing to report)."
+        )

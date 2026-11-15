@@ -23,6 +23,11 @@ class Config:
     LOGS_DIR: Path = PROJECT_ROOT / "logs"
     REPORTS_DIR: Path = PROJECT_ROOT / "reports"
 
+    # ── Jira Integration Output ────────────────────────────────
+    # Path to the structured failure report consumed by the Jenkins
+    # pipeline for Jira webhook dispatch.  Never contains credentials.
+    JIRA_FAILURES_JSON: Path = PROJECT_ROOT / "reports" / "failures.json"
+
     # ── Target Application ─────────────────────────────────────
     BASE_URL: str = os.getenv("BASE_URL", "https://www.saucedemo.com")
 
